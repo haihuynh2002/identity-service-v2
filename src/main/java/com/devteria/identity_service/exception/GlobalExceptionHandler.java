@@ -1,7 +1,6 @@
 package com.devteria.identity_service.exception;
 
-import com.devteria.identity_service.dto.request.ApiResponse;
-import org.apache.coyote.Response;
+import com.devteria.identity_service.dto.response.ApiResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
