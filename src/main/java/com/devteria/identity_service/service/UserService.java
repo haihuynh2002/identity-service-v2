@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PostAuthorize;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -50,15 +52,13 @@ public class UserService {
         return userRepository.save(user);
     }
 
-    public List<User> getUsers() {
-        var authentication = SecurityContextHolder.getContext().getAuthentication();
-
-        log.info("username: " + authentication.getName());
-        authentication.getAuthorities().forEach(auth -> log.info(auth.toString()));
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<UserResponse> getUsers() {
+        return userRepository.findAll().stream().map(userMapper::toUserResponse).toList();
 
     }
 
-
+    @PostAuthorize("returnObject.username == authentication.name")
     public UserResponse getUser(String id) {
         return userMapper.toUserResponse(userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found")));
@@ -74,5 +74,13 @@ public class UserService {
 
     public void deleteUser(String userId) {
         userRepository.deleteById(userId);
+    }
+
+    public UserResponse getMyInfo() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        var user = userRepository.findByUsername(authentication.getName()).orElseThrow(
+                () -> new AppException(ErrorCode.USER_NOT_EXISTS)
+        );
+        return userMapper.toUserResponse(user);
     }
 }

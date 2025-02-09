@@ -30,7 +30,7 @@ public class UserController {
     }
 
     @GetMapping
-    public List<User> getUsers() {
+    public List<UserResponse> getUsers() {
         return userService.getUsers();
     }
 
@@ -49,4 +49,12 @@ public class UserController {
         userService.deleteUser(userId);
         return "User has been deleted";
     }
+
+    @GetMapping("/myInfo")
+    public ApiResponse<UserResponse> getMyInfo() {
+        return ApiResponse.<UserResponse>builder()
+                .result(userService.getMyInfo())
+                .build();
+    }
+
 }
