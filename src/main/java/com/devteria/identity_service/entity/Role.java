@@ -1,21 +1,23 @@
-package com.devteria.identity_service.dto.request;
+package com.devteria.identity_service.entity;
 
+import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 import java.time.LocalDate;
 import java.util.Set;
 
+@Entity
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class UserUpdateRequest {
-    String password;
-    String firstName;
-    String lastName;
-    LocalDate dob;
+public class Role {
+    @Id
+    String name;
+    String description;
 
-    Set<String> roles;
+    @ManyToMany
+    Set<Permission> permissions;
 }
