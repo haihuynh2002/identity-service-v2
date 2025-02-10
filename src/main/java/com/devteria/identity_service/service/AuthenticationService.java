@@ -3,6 +3,7 @@ package com.devteria.identity_service.service;
 import com.devteria.identity_service.dto.request.AuthenticationRequest;
 import com.devteria.identity_service.dto.request.IntrospectRequest;
 import com.devteria.identity_service.dto.request.LogoutRequest;
+import com.devteria.identity_service.dto.request.RefreshRequest;
 import com.devteria.identity_service.dto.response.AuthenticationResponse;
 import com.devteria.identity_service.dto.response.IntrospectResponse;
 import com.devteria.identity_service.entity.InvalidToken;
@@ -48,6 +49,14 @@ public class AuthenticationService {
     @Value("${jwt.signer-key}")
     protected String SIGNER_KEY;
 
+    @NonFinal
+    @Value("${jwt.valid-duration}")
+    protected long VALID_DUARATION;
+
+    @NonFinal
+    @Value("${jwt.refreshable-duration}")
+    protected long REFRESHABLE_DUARATION;
+
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
         User user = userRepository.findByUsername(request.getUsername()).orElseThrow(
                 () -> new AppException(ErrorCode.USER_NOT_EXISTS)
@@ -92,17 +101,21 @@ public class AuthenticationService {
         }
     }
 
-    public void logout(LogoutRequest request) throws ParseException, JOSEException {
-        var signedJWT = verifyToken(request.getToken());
-        String id = signedJWT.getJWTClaimsSet().getJWTID();
-        Date expirationTime = signedJWT.getJWTClaimsSet().getExpirationTime();
+    public void logout(LogoutRequest request) {
+        try {
+            var signedJWT = verifyToken(request.getToken(), true);
+            String id = signedJWT.getJWTClaimsSet().getJWTID();
+            Date expirationTime = signedJWT.getJWTClaimsSet().getExpirationTime();
 
-        InvalidToken invalidToken = InvalidToken.builder()
-                .id(id)
-                .expirationTime(expirationTime)
-                .build();
+            InvalidToken invalidToken = InvalidToken.builder()
+                    .id(id)
+                    .expirationTime(expirationTime)
+                    .build();
 
-        invalidTokenRepository.save(invalidToken);
+            invalidTokenRepository.save(invalidToken);
+        } catch (JOSEException | ParseException e) {
+            log.info("Token has already expired");
+        }
 
     }
 
@@ -111,7 +124,7 @@ public class AuthenticationService {
 
         var isValid = true;
         try {
-            verifyToken(token);
+            verifyToken(token, false);
         } catch (IllegalArgumentException e) {
             isValid = false;
         }
@@ -121,17 +134,39 @@ public class AuthenticationService {
                 .build();
     }
 
-    private SignedJWT verifyToken(String token) throws JOSEException, ParseException {
+    private SignedJWT verifyToken(String token, boolean isRefresh) throws JOSEException, ParseException {
         JWSVerifier jwsVerifier = new MACVerifier(SIGNER_KEY.getBytes());
         SignedJWT signedJWT = SignedJWT.parse(token);
         var verified = signedJWT.verify(jwsVerifier);
-        var expirationTime = signedJWT.getJWTClaimsSet().getExpirationTime();
+        var expirationTime = isRefresh
+                ? new Date(signedJWT.getJWTClaimsSet().getExpirationTime().toInstant().plus(REFRESHABLE_DUARATION, ChronoUnit.SECONDS).toEpochMilli())
+                : signedJWT.getJWTClaimsSet().getExpirationTime();
 
         if(!(verified && expirationTime.after(new Date())
         && !invalidTokenRepository.existsById(signedJWT.getJWTClaimsSet().getJWTID()))) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
         return signedJWT;
+    }
+
+    public AuthenticationResponse refreshToken(RefreshRequest request) throws ParseException, JOSEException {
+        String token = request.getToken();
+        var singedJWT = verifyToken(token, true);
+
+        var logoutRequest = LogoutRequest.builder().token(token).build();
+        logout(logoutRequest);
+
+        String username = singedJWT.getJWTClaimsSet().getSubject();
+        var user = userRepository.findByUsername(username).orElseThrow(
+                () -> new AppException(ErrorCode.USERNAME_INVALID)
+        );
+
+        var newToken = generateToken(user);
+        return AuthenticationResponse.builder()
+                .token(newToken)
+                .isAuthenticated(true)
+                .build();
+
     }
 
     private String buildScope(User user) {
