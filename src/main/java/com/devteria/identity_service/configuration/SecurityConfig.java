@@ -1,6 +1,7 @@
 package com.devteria.identity_service.configuration;
 
 import com.devteria.identity_service.enums.Role;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -23,10 +24,11 @@ import javax.crypto.spec.SecretKeySpec;
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+    private static final String[] PUBLIC_ENPOINTS = {"/users", "/auth/token",
+            "/auth/introspect", "/auth/logout"};
 
-    @Value("${jwt.signer-key}")
-    protected String SIGNER_KEY;
-    private static final String[] PUBLIC_ENPOINTS = {"/users", "/auth/token", "/auth/introspect"};
+    @Autowired
+    CustomJwtDecoder customJwtDecoder;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity httpSecurity) throws Exception {
@@ -36,7 +38,7 @@ public class SecurityConfig {
 
         httpSecurity.oauth2ResourceServer(oauth ->
             oauth.jwt(jwtConfigurer ->
-                    jwtConfigurer.decoder(jwtDecoder())
+                    jwtConfigurer.decoder(customJwtDecoder)
                             .jwtAuthenticationConverter(jwtAuthenticationConverter()))
                     .authenticationEntryPoint(new JwtAuthenticationEntryPoint()));
 
@@ -53,14 +55,6 @@ public class SecurityConfig {
         JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
         jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(jwtGrantedAuthoritiesConverter);
         return jwtAuthenticationConverter;
-    }
-
-    @Bean
-    JwtDecoder jwtDecoder() {
-        SecretKeySpec secretKeySpec = new SecretKeySpec(SIGNER_KEY.getBytes(), "HS512");
-        return NimbusJwtDecoder.withSecretKey(secretKeySpec)
-                .macAlgorithm(MacAlgorithm.HS512)
-                .build();
     }
 
     @Bean

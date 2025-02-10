@@ -2,12 +2,15 @@ package com.devteria.identity_service.service;
 
 import com.devteria.identity_service.dto.request.AuthenticationRequest;
 import com.devteria.identity_service.dto.request.IntrospectRequest;
+import com.devteria.identity_service.dto.request.LogoutRequest;
 import com.devteria.identity_service.dto.response.AuthenticationResponse;
 import com.devteria.identity_service.dto.response.IntrospectResponse;
+import com.devteria.identity_service.entity.InvalidToken;
 import com.devteria.identity_service.entity.Role;
 import com.devteria.identity_service.entity.User;
 import com.devteria.identity_service.exception.AppException;
 import com.devteria.identity_service.exception.ErrorCode;
+import com.devteria.identity_service.repository.InvalidTokenRepository;
 import com.devteria.identity_service.repository.UserRepository;
 import com.nimbusds.jose.*;
 import com.nimbusds.jose.crypto.MACSigner;
@@ -19,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.experimental.NonFinal;
 import lombok.extern.slf4j.Slf4j;
+import org.antlr.v4.runtime.Token;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -30,6 +34,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.StringJoiner;
+import java.util.UUID;
 
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
@@ -37,6 +42,7 @@ import java.util.StringJoiner;
 @Slf4j
 public class AuthenticationService {
     UserRepository userRepository;
+    InvalidTokenRepository invalidTokenRepository;
 
     @NonFinal
     @Value("${jwt.signer-key}")
@@ -71,6 +77,7 @@ public class AuthenticationService {
                         Instant.now().plus(1, ChronoUnit.HOURS).toEpochMilli()
                 ))
                 .claim("scope", buildScope(user))
+                .jwtID(UUID.randomUUID().toString())
                 .build();
 
         Payload payload = new Payload(jwtClaimsSet.toJSONObject());
@@ -85,16 +92,46 @@ public class AuthenticationService {
         }
     }
 
+    public void logout(LogoutRequest request) throws ParseException, JOSEException {
+        var signedJWT = verifyToken(request.getToken());
+        String id = signedJWT.getJWTClaimsSet().getJWTID();
+        Date expirationTime = signedJWT.getJWTClaimsSet().getExpirationTime();
+
+        InvalidToken invalidToken = InvalidToken.builder()
+                .id(id)
+                .expirationTime(expirationTime)
+                .build();
+
+        invalidTokenRepository.save(invalidToken);
+
+    }
+
     public IntrospectResponse introspect(IntrospectRequest request) throws JOSEException, ParseException {
         String token = request.getToken();
 
+        var isValid = true;
+        try {
+            verifyToken(token);
+        } catch (IllegalArgumentException e) {
+            isValid = false;
+        }
+
+        return IntrospectResponse.builder()
+                .isValid(isValid)
+                .build();
+    }
+
+    private SignedJWT verifyToken(String token) throws JOSEException, ParseException {
         JWSVerifier jwsVerifier = new MACVerifier(SIGNER_KEY.getBytes());
         SignedJWT signedJWT = SignedJWT.parse(token);
         var verified = signedJWT.verify(jwsVerifier);
         var expirationTime = signedJWT.getJWTClaimsSet().getExpirationTime();
-        return IntrospectResponse.builder()
-                .isValid(verified && expirationTime.after(new Date()))
-                .build();
+
+        if(!(verified && expirationTime.after(new Date())
+        && !invalidTokenRepository.existsById(signedJWT.getJWTClaimsSet().getJWTID()))) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        return signedJWT;
     }
 
     private String buildScope(User user) {
